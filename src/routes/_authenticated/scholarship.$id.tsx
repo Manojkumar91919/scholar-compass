@@ -29,7 +29,7 @@ function ScholarshipPage() {
   const saved = useQuery({ queryKey: ["saved"], queryFn: () => savedFn() });
   const applications = useQuery({ queryKey: ["applications"], queryFn: () => apps() });
 
-  const [eligibility, setEligibility] = useState<null | { eligible: boolean; score: number; reasons: string[]; gaps: string[] }>(null);
+  const [eligibility, setEligibility] = useState<null | { eligible: boolean; score: number; reasons?: string[]; gaps?: string[] }>(null);
   const isSaved = saved.data?.some((s) => s.scholarship_id === id);
   const app = applications.data?.find((a) => a.scholarship_id === id);
 
@@ -86,7 +86,7 @@ function ScholarshipPage() {
             <div className="glass rounded-2xl p-6">
               <div className="font-display text-lg font-semibold mb-3">Required documents</div>
               <div className="flex flex-wrap gap-2">
-                {s.required_documents.map((d) => (
+                {s.required_documents.map((d: string) => (
                   <span key={d} className="text-xs px-3 py-1 rounded-full bg-primary/10 text-primary border border-primary/20">{d}</span>
                 ))}
               </div>
