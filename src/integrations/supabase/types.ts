@@ -493,8 +493,6 @@ export type Database = {
           title: string
         }[]
       }
-      show_limit: { Args: never; Returns: number }
-      show_trgm: { Args: { "": string }; Returns: string[] }
     }
     Enums: {
       agent_kind:
