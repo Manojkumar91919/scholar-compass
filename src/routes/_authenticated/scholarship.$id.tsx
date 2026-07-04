@@ -141,16 +141,16 @@ function ScholarshipPage() {
                   <span className="font-medium">{eligibility.eligible ? "Likely eligible" : "Gaps detected"}</span>
                   <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-primary/15 text-primary">{eligibility.score}%</span>
                 </div>
-                {eligibility.reasons.length > 0 && (
+                {(eligibility.reasons?.length ?? 0) > 0 && (
                   <ul className="space-y-1 text-xs text-muted-foreground list-disc pl-4">
-                    {eligibility.reasons.slice(0, 4).map((r) => <li key={r}>{r}</li>)}
+                    {eligibility.reasons!.slice(0, 4).map((r) => <li key={r}>{r}</li>)}
                   </ul>
                 )}
-                {eligibility.gaps.length > 0 && (
+                {(eligibility.gaps?.length ?? 0) > 0 && (
                   <div className="mt-2 text-xs">
                     <div className="text-warning font-medium">Gaps</div>
                     <ul className="space-y-1 text-muted-foreground list-disc pl-4">
-                      {eligibility.gaps.slice(0, 4).map((g) => <li key={g}>{g}</li>)}
+                      {eligibility.gaps!.slice(0, 4).map((g) => <li key={g}>{g}</li>)}
                     </ul>
                   </div>
                 )}
