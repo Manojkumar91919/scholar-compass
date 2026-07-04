@@ -378,7 +378,7 @@ export async function checklistAgent(
       `Profile: ${JSON.stringify(profile)}\n\nScholarship: ${JSON.stringify(scholarship)}`,
       Checklist,
     )) ?? { items: [] };
-  const items = result.items.map((it, i) => ({
+  const items = (result.items ?? []).map((it, i) => ({
     id: it.id ?? `${Date.now()}-${i}`,
     label: it.label,
     category: it.category,
