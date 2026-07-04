@@ -179,8 +179,8 @@ export async function searchAgent(sb: SB, runId: string, profile: Profile, query
       const { data } = await sb.rpc("match_scholarships", {
         query_embedding: emb as never,
         match_count: 20,
-        filter_country: filters.country ?? null,
-        filter_degree: (filters.degree_level as never) ?? null,
+        filter_country: filters.country ?? undefined,
+        filter_degree: (filters.degree_level as never) ?? undefined,
       });
       if (data && data.length) {
         // Enrich with full row
