@@ -1,0 +1,1 @@
+ALTER TABLE public.checklists ADD CONSTRAINT checklists_application_id_key UNIQUE (application_id);
