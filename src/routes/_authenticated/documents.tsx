@@ -1,10 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { listDocuments, reviewDocument } from "@/lib/scholar.functions";
-import { Loader2, Sparkles, FileText } from "lucide-react";
+import { extractTextFromFile } from "@/lib/pdf-extract";
+import { Loader2, Sparkles, FileText, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/documents")({
