@@ -24,6 +24,8 @@ function DocsPage() {
   const [kind, setKind] = useState<(typeof KINDS)[number]>("sop");
   const [text, setText] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
+  const [parsing, setParsing] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const mut = useMutation({
     mutationFn: () => review({ data: { title, kind, text } }),
@@ -35,6 +37,28 @@ function DocsPage() {
     onError: (e) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (f.size > 15 * 1024 * 1024) { toast.error("File too large (max 15MB)"); return; }
+    setParsing(true);
+    try {
+      const extracted = await extractTextFromFile(f);
+      if (extracted.trim().length < 50) {
+        toast.error("Could not extract enough text from this file");
+      } else {
+        setText(extracted);
+        if (!title) setTitle(f.name.replace(/\.[^.]+$/, ""));
+        toast.success(`Extracted ${extracted.length.toLocaleString()} characters`);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to parse file");
+    } finally {
+      setParsing(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
   const active = q.data?.find((d) => d.id === selected) ?? q.data?.[0];
   const rev = active?.review as null | { score: number; grammar: number; ats: number; readability: number; strengths: string[]; weaknesses: string[]; suggestions: string[]; missing: string[] };
 
@@ -42,7 +66,7 @@ function DocsPage() {
     <AppShell>
       <div className="mb-6">
         <h1 className="font-display text-3xl font-bold">Documents</h1>
-        <p className="text-muted-foreground text-sm">Paste your resume, SOP, or essay. The Document Review Agent grades and gives actionable feedback.</p>
+        <p className="text-muted-foreground text-sm">Upload a PDF/TXT or paste text. The Document Review Agent grades and gives actionable feedback.</p>
       </div>
       <div className="grid lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-4">
@@ -51,7 +75,12 @@ function DocsPage() {
             <select value={kind} onChange={(e) => setKind(e.target.value as never)} className="w-full bg-input/50 border border-border rounded-lg px-3 py-2">
               {KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
             </select>
-            <textarea value={text} onChange={(e) => setText(e.target.value)} rows={12} placeholder="Paste content (min 50 chars)…" className="w-full bg-input/50 border border-border rounded-lg px-3 py-2 font-mono text-sm" />
+            <input ref={fileRef} type="file" accept=".pdf,.txt,.md,application/pdf,text/plain" onChange={onFile} className="hidden" />
+            <button type="button" onClick={() => fileRef.current?.click()} disabled={parsing} className="w-full border border-dashed border-primary/40 rounded-lg px-3 py-4 flex items-center justify-center gap-2 text-sm hover:bg-primary/5 disabled:opacity-50">
+              {parsing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4 text-primary" />}
+              {parsing ? "Extracting text…" : "Upload PDF / TXT (or paste below)"}
+            </button>
+            <textarea value={text} onChange={(e) => setText(e.target.value)} rows={12} placeholder="Paste content, or upload above (min 50 chars)…" className="w-full bg-input/50 border border-border rounded-lg px-3 py-2 font-mono text-sm" />
             <button onClick={() => mut.mutate()} disabled={mut.isPending || text.length < 50 || !title} className="bg-brand text-white px-4 py-2 rounded-lg glow flex items-center gap-2 disabled:opacity-50">
               {mut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
               Review with AI
