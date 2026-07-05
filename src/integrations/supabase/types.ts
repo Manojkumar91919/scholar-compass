@@ -167,7 +167,7 @@ export type Database = {
           {
             foreignKeyName: "checklists_application_id_fkey"
             columns: ["application_id"]
-            isOneToOne: false
+            isOneToOne: true
             referencedRelation: "applications"
             referencedColumns: ["id"]
           },
