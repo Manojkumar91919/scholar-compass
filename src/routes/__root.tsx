@@ -77,14 +77,18 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "ScholarAI — Multi-Agent Scholarship Assistant" },
-      { name: "description", content: "Discover scholarships, verify eligibility, review documents, and track deadlines with a supervisor-led multi-agent AI system." },
+      { title: "ScholarAI — Multi-Agent Scholarship Discovery & Application Assistant" },
+      { name: "description", content: "Discover scholarships, verify eligibility, prepare stronger applications, and never miss a deadline — powered by a multi-agent AI supervisor." },
       { name: "author", content: "ScholarAI" },
-      { property: "og:title", content: "ScholarAI — Multi-Agent Scholarship Assistant" },
-      { property: "og:description", content: "AI agents that find, filter, and help you win scholarships." },
+      { property: "og:title", content: "ScholarAI — Multi-Agent Scholarship Discovery & Application Assistant" },
+      { property: "og:description", content: "Discover scholarships, verify eligibility, prepare stronger applications, and never miss a deadline — powered by a multi-agent AI supervisor." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:site", content: "@ScholarAI" },
+      { name: "twitter:title", content: "ScholarAI — Multi-Agent Scholarship Discovery & Application Assistant" },
+      { name: "twitter:description", content: "Discover scholarships, verify eligibility, prepare stronger applications, and never miss a deadline — powered by a multi-agent AI supervisor." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/cf9b95d0-04d3-4013-b2ba-9ddda55ac2cf/id-preview-aa9d3262--a34c8abb-e360-41c2-a465-300810dcd50e.lovable.app-1783252404471.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/cf9b95d0-04d3-4013-b2ba-9ddda55ac2cf/id-preview-aa9d3262--a34c8abb-e360-41c2-a465-300810dcd50e.lovable.app-1783252404471.png" },
     ],
     links: [
       {
