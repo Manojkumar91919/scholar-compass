@@ -495,7 +495,7 @@ export async function discoverPipeline(sb: SB, userId: string, query: string) {
     );
 
     const { scholarships } = await searchAgent(sb, runId, p, query);
-    const ranked = await rankingAgent(sb, runId, p, scholarships);
+    const ranked = await rankingAgent(sb, runId, p, scholarships, query);
 
     await finishRun(sb, runId, { count: ranked.length });
     return { ranked, runId };
