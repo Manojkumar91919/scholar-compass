@@ -273,52 +273,69 @@ export type RankedScholarship = Scholarship & {
   rationale: string;
   urgency: "high" | "medium" | "low";
 };
-export async function rankingAgent(sb: SB, runId: string, profile: Profile, scholarships: Scholarship[]) {
-  const t0 = Date.now();
+/** Pure deterministic scoring — exported for testability. */
+export function scoreScholarship(
+  profile: Profile,
+  s: Scholarship,
+  query?: string,
+): { score: number; urgency: "high" | "medium" | "low" } {
   const today = Date.now();
   const day = 86400000;
+  let score = 40;
+  if (profile.target_countries?.includes(s.country ?? "")) score += 20;
+  if (s.country === "Global") score += 8;
+  if (profile.degree_level && (s.degree_level === profile.degree_level || s.degree_level === "any")) score += 12;
+  if (
+    profile.field_of_study &&
+    s.fields?.some((f) => profile.field_of_study!.toLowerCase().includes(f.toLowerCase()))
+  )
+    score += 10;
+  if (
+    profile.country &&
+    (!s.eligible_countries || s.eligible_countries.length === 0 || s.eligible_countries.includes(profile.country))
+  )
+    score += 6;
+  if (s.min_cgpa && profile.cgpa && profile.cgpa >= s.min_cgpa) score += 6;
+  if (s.min_cgpa && profile.cgpa && profile.cgpa < s.min_cgpa) score -= 15;
+  if ((s.amount_usd ?? 0) > 30000) score += 4;
 
-  // Deterministic scoring
-  const scored = scholarships.map((s) => {
-    let score = 40; // baseline
-    // Country alignment
-    if (profile.target_countries?.includes(s.country ?? "")) score += 20;
-    if (s.country === "Global") score += 8;
-    // Degree
-    if (profile.degree_level && (s.degree_level === profile.degree_level || s.degree_level === "any")) score += 12;
-    // Field
-    if (
-      profile.field_of_study &&
-      s.fields?.some((f) => profile.field_of_study!.toLowerCase().includes(f.toLowerCase()))
-    )
-      score += 10;
-    // Eligible countries
-    if (
-      profile.country &&
-      (!s.eligible_countries || s.eligible_countries.length === 0 || s.eligible_countries.includes(profile.country))
-    )
-      score += 6;
-    // CGPA
-    if (s.min_cgpa && profile.cgpa && profile.cgpa >= s.min_cgpa) score += 6;
-    if (s.min_cgpa && profile.cgpa && profile.cgpa < s.min_cgpa) score -= 15;
-    // Funding value
-    if ((s.amount_usd ?? 0) > 30000) score += 4;
-    // Deadline urgency
-    let urgency: "high" | "medium" | "low" = "low";
-    if (s.deadline) {
-      const daysLeft = (new Date(s.deadline).getTime() - today) / day;
-      if (daysLeft < 0) score -= 30;
-      else if (daysLeft < 30) {
-        score += 5;
-        urgency = "high";
-      } else if (daysLeft < 90) urgency = "medium";
+  // Query keyword relevance — improves search accuracy
+  if (query) {
+    const q = query.toLowerCase();
+    const haystack = `${s.title} ${s.summary ?? ""} ${s.provider} ${(s.tags ?? []).join(" ")} ${(s.fields ?? []).join(" ")} ${s.country ?? ""}`.toLowerCase();
+    const tokens = q.split(/\W+/).filter((t) => t.length > 3);
+    const hits = tokens.filter((t) => haystack.includes(t)).length;
+    if (tokens.length > 0) {
+      const ratio = hits / tokens.length;
+      score += Math.round(ratio * 20);
+      if (ratio === 0) score -= 25; // strong penalty for zero keyword overlap
     }
-    score = Math.max(0, Math.min(100, score));
+  }
+
+  let urgency: "high" | "medium" | "low" = "low";
+  if (s.deadline) {
+    const daysLeft = (new Date(s.deadline).getTime() - today) / day;
+    if (daysLeft < 0) score -= 30;
+    else if (daysLeft < 30) {
+      score += 5;
+      urgency = "high";
+    } else if (daysLeft < 90) urgency = "medium";
+  }
+  return { score: Math.max(0, Math.min(100, score)), urgency };
+}
+
+export async function rankingAgent(sb: SB, runId: string, profile: Profile, scholarships: Scholarship[], query?: string) {
+  const t0 = Date.now();
+  const scored = scholarships.map((s) => {
+    const { score, urgency } = scoreScholarship(profile, s, query);
     return { ...s, match_score: score, urgency, rationale: "" };
   });
 
   scored.sort((a, b) => b.match_score - a.match_score);
-  const top = scored.slice(0, 10);
+  // Only return results with meaningful match — accuracy over quantity.
+  const filtered = scored.filter((s) => s.match_score >= 35);
+  const top = (filtered.length >= 3 ? filtered : scored).slice(0, 10);
+
 
   // LLM rationale for top 10
   try {
