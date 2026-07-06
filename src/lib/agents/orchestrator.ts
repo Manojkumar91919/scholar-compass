@@ -172,37 +172,36 @@ export async function searchAgent(sb: SB, runId: string, profile: Profile, query
       SearchFilters,
     )) ?? { keywords: query, country: null, degree_level: null, field: null };
 
-    // Hybrid retrieval: try embedding first, fall back to text ilike.
+    // Hybrid retrieval: embedding first, keyword fallback.
     let scholarships: Scholarship[] = [];
     try {
       const emb = await embed(`${query} ${filters.keywords}`, requireApiKey());
       const { data } = await sb.rpc("match_scholarships", {
         query_embedding: emb as never,
-        match_count: 20,
+        match_count: 40,
         filter_country: filters.country ?? undefined,
         filter_degree: (filters.degree_level as never) ?? undefined,
       });
       if (data && data.length) {
-        // Enrich with full row
         const ids = data.map((d) => d.id);
-        const { data: full } = await sb
-          .from("scholarships")
-          .select("*")
-          .in("id", ids);
+        const { data: full } = await sb.from("scholarships").select("*").in("id", ids).eq("is_active", true);
         scholarships = (full ?? []) as Scholarship[];
       }
     } catch {
-      // Embedding failed — fall back
+      /* embedding failed */
     }
     if (scholarships.length === 0) {
       const kw = filters.keywords || query;
-      const q = sb.from("scholarships").select("*").eq("is_active", true);
-      if (filters.country) q.eq("country", filters.country);
-      const { data } = kw
-        ? await q.or(`title.ilike.%${kw}%,summary.ilike.%${kw}%,tags.cs.{${kw}}`).limit(20)
-        : await q.limit(20);
+      let qb = sb.from("scholarships").select("*").eq("is_active", true);
+      if (filters.country) qb = qb.eq("country", filters.country);
+      if (kw) qb = qb.or(`title.ilike.%${kw}%,summary.ilike.%${kw}%,eligibility.ilike.%${kw}%,tags.cs.{${kw}}`);
+      const { data } = await qb.limit(40);
       scholarships = (data ?? []) as Scholarship[];
     }
+
+    // Deterministic post-filter for accuracy — filters extracted by LLM
+    // are trustworthy hints; drop obvious mismatches and expired deadlines.
+    scholarships = postFilter(scholarships, filters, profile);
 
     await logStep(sb, runId, "search", { query, filters }, { count: scholarships.length }, Date.now() - t0);
     return { filters, scholarships };
@@ -211,6 +210,35 @@ export async function searchAgent(sb: SB, runId: string, profile: Profile, query
     await logStep(sb, runId, "search", { query }, null, Date.now() - t0, err);
     throw e;
   }
+}
+
+/** Pure post-filter: drops expired deadlines and hard mismatches. Exported for tests. */
+export function postFilter(
+  scholarships: Scholarship[],
+  filters: { keywords?: string; country?: string | null; degree_level?: string | null; field?: string | null },
+  profile: Profile,
+): Scholarship[] {
+  const today = Date.now();
+  return scholarships.filter((s) => {
+    if (s.deadline && new Date(s.deadline).getTime() < today) return false;
+    if (filters.country && s.country && s.country !== "Global" && s.country !== filters.country) return false;
+    if (filters.degree_level && s.degree_level && s.degree_level !== "any" && s.degree_level !== filters.degree_level) return false;
+    if (filters.field && s.fields?.length) {
+      const f = filters.field.toLowerCase();
+      const hit = s.fields.some((x) => x.toLowerCase().includes(f) || f.includes(x.toLowerCase()));
+      if (!hit) return false;
+    }
+    if (
+      profile.country &&
+      s.eligible_countries &&
+      s.eligible_countries.length > 0 &&
+      !s.eligible_countries.includes(profile.country) &&
+      !s.eligible_countries.includes("Global")
+    ) {
+      return false;
+    }
+    return true;
+  });
 }
 
 // ----- ELIGIBILITY AGENT -----
@@ -245,52 +273,69 @@ export type RankedScholarship = Scholarship & {
   rationale: string;
   urgency: "high" | "medium" | "low";
 };
-export async function rankingAgent(sb: SB, runId: string, profile: Profile, scholarships: Scholarship[]) {
-  const t0 = Date.now();
+/** Pure deterministic scoring — exported for testability. */
+export function scoreScholarship(
+  profile: Profile,
+  s: Scholarship,
+  query?: string,
+): { score: number; urgency: "high" | "medium" | "low" } {
   const today = Date.now();
   const day = 86400000;
+  let score = 40;
+  if (profile.target_countries?.includes(s.country ?? "")) score += 20;
+  if (s.country === "Global") score += 8;
+  if (profile.degree_level && (s.degree_level === profile.degree_level || s.degree_level === "any")) score += 12;
+  if (
+    profile.field_of_study &&
+    s.fields?.some((f) => profile.field_of_study!.toLowerCase().includes(f.toLowerCase()))
+  )
+    score += 10;
+  if (
+    profile.country &&
+    (!s.eligible_countries || s.eligible_countries.length === 0 || s.eligible_countries.includes(profile.country))
+  )
+    score += 6;
+  if (s.min_cgpa && profile.cgpa && profile.cgpa >= s.min_cgpa) score += 6;
+  if (s.min_cgpa && profile.cgpa && profile.cgpa < s.min_cgpa) score -= 15;
+  if ((s.amount_usd ?? 0) > 30000) score += 4;
 
-  // Deterministic scoring
-  const scored = scholarships.map((s) => {
-    let score = 40; // baseline
-    // Country alignment
-    if (profile.target_countries?.includes(s.country ?? "")) score += 20;
-    if (s.country === "Global") score += 8;
-    // Degree
-    if (profile.degree_level && (s.degree_level === profile.degree_level || s.degree_level === "any")) score += 12;
-    // Field
-    if (
-      profile.field_of_study &&
-      s.fields?.some((f) => profile.field_of_study!.toLowerCase().includes(f.toLowerCase()))
-    )
-      score += 10;
-    // Eligible countries
-    if (
-      profile.country &&
-      (!s.eligible_countries || s.eligible_countries.length === 0 || s.eligible_countries.includes(profile.country))
-    )
-      score += 6;
-    // CGPA
-    if (s.min_cgpa && profile.cgpa && profile.cgpa >= s.min_cgpa) score += 6;
-    if (s.min_cgpa && profile.cgpa && profile.cgpa < s.min_cgpa) score -= 15;
-    // Funding value
-    if ((s.amount_usd ?? 0) > 30000) score += 4;
-    // Deadline urgency
-    let urgency: "high" | "medium" | "low" = "low";
-    if (s.deadline) {
-      const daysLeft = (new Date(s.deadline).getTime() - today) / day;
-      if (daysLeft < 0) score -= 30;
-      else if (daysLeft < 30) {
-        score += 5;
-        urgency = "high";
-      } else if (daysLeft < 90) urgency = "medium";
+  // Query keyword relevance — improves search accuracy
+  if (query) {
+    const q = query.toLowerCase();
+    const haystack = `${s.title} ${s.summary ?? ""} ${s.provider} ${(s.tags ?? []).join(" ")} ${(s.fields ?? []).join(" ")} ${s.country ?? ""}`.toLowerCase();
+    const tokens = q.split(/\W+/).filter((t) => t.length > 3);
+    const hits = tokens.filter((t) => haystack.includes(t)).length;
+    if (tokens.length > 0) {
+      const ratio = hits / tokens.length;
+      score += Math.round(ratio * 20);
+      if (ratio === 0) score -= 25; // strong penalty for zero keyword overlap
     }
-    score = Math.max(0, Math.min(100, score));
+  }
+
+  let urgency: "high" | "medium" | "low" = "low";
+  if (s.deadline) {
+    const daysLeft = (new Date(s.deadline).getTime() - today) / day;
+    if (daysLeft < 0) score -= 30;
+    else if (daysLeft < 30) {
+      score += 5;
+      urgency = "high";
+    } else if (daysLeft < 90) urgency = "medium";
+  }
+  return { score: Math.max(0, Math.min(100, score)), urgency };
+}
+
+export async function rankingAgent(sb: SB, runId: string, profile: Profile, scholarships: Scholarship[], query?: string) {
+  const t0 = Date.now();
+  const scored = scholarships.map((s) => {
+    const { score, urgency } = scoreScholarship(profile, s, query);
     return { ...s, match_score: score, urgency, rationale: "" };
   });
 
   scored.sort((a, b) => b.match_score - a.match_score);
-  const top = scored.slice(0, 10);
+  // Only return results with meaningful match — accuracy over quantity.
+  const filtered = scored.filter((s) => s.match_score >= 35);
+  const top = (filtered.length >= 3 ? filtered : scored).slice(0, 10);
+
 
   // LLM rationale for top 10
   try {
@@ -450,7 +495,7 @@ export async function discoverPipeline(sb: SB, userId: string, query: string) {
     );
 
     const { scholarships } = await searchAgent(sb, runId, p, query);
-    const ranked = await rankingAgent(sb, runId, p, scholarships);
+    const ranked = await rankingAgent(sb, runId, p, scholarships, query);
 
     await finishRun(sb, runId, { count: ranked.length });
     return { ranked, runId };

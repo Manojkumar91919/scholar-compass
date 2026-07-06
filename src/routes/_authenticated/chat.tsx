@@ -185,7 +185,7 @@ function MessageBubble({ msg }: { msg: Msg }) {
               : "glass rounded-tl-sm relative group"
           }`}
         >
-          <div className="prose prose-invert prose-sm max-w-none prose-p:my-2 prose-headings:mt-3 prose-headings:mb-2 prose-headings:font-display prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-code:text-primary prose-code:bg-primary/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none prose-a:text-primary prose-a:no-underline hover:prose-a:underline prose-strong:text-foreground">
+          <div className="prose prose-invert prose-sm max-w-none leading-relaxed prose-p:my-3 prose-p:leading-7 prose-headings:mt-5 prose-headings:mb-3 prose-headings:font-display prose-h1:text-lg prose-h2:text-base prose-h3:text-sm prose-ul:my-3 prose-ol:my-3 prose-li:my-1.5 prose-li:leading-6 prose-hr:my-4 prose-blockquote:my-3 prose-blockquote:border-l-primary/50 prose-code:text-primary prose-code:bg-primary/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none prose-a:text-primary prose-a:no-underline hover:prose-a:underline prose-strong:text-foreground prose-strong:font-semibold">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
           </div>
           {!isUser && (

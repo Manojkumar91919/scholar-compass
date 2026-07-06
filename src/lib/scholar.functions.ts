@@ -273,7 +273,89 @@ export const reviewDocument = createServerFn({ method: "POST" })
       .single();
     if (error) throw error;
     await context.supabase.from("agent_runs").update({ status: "succeeded", output: { doc_id: doc.id } as never, finished_at: new Date().toISOString() }).eq("id", run!.id);
+
+    // Auto-analyze profile from resume uploads
+    if (data.kind === "resume") {
+      try {
+        await analyzeResumeInternal(context.supabase, context.userId, data.text);
+      } catch {
+        /* profile analysis is best-effort; review already succeeded */
+      }
+    }
     return doc;
+  });
+
+// ------- Resume → Profile auto-analysis -------
+async function analyzeResumeInternal(
+  supabase: Awaited<ReturnType<typeof getSb>>,
+  userId: string,
+  text: string,
+) {
+  const { generateText } = await import("ai");
+  const { createLovableAiGatewayProvider, DEFAULT_CHAT_MODEL, requireApiKey } = await import(
+    "@/lib/ai-gateway.server"
+  );
+  const { RESUME_EXTRACT_SYSTEM } = await import("@/lib/agents/prompts");
+  const gateway = createLovableAiGatewayProvider(requireApiKey());
+  const model = gateway(DEFAULT_CHAT_MODEL);
+  const { text: out } = await generateText({
+    model,
+    system: `${RESUME_EXTRACT_SYSTEM}\n\nRespond with ONLY valid JSON, no prose, no markdown fences.`,
+    prompt: `Resume text:\n\n${text.slice(0, 12000)}`,
+  });
+  const cleaned = out.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+  let parsed: Record<string, unknown> = {};
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    const m = cleaned.match(/\{[\s\S]*\}/);
+    if (!m) return null;
+    parsed = JSON.parse(m[0]);
+  }
+
+  // Merge with existing profile — never wipe good data with nulls.
+  const { data: existing } = await supabase.from("profiles").select("*").eq("user_id", userId).maybeSingle();
+  const merge = <T,>(next: T | null | undefined, prev: T | null | undefined) =>
+    next === null || next === undefined || next === "" ? prev : next;
+  const patch = {
+    full_name: merge(parsed.full_name as string | null, existing?.full_name),
+    country: merge(parsed.country as string | null, existing?.country),
+    degree_level: merge(parsed.degree_level as string | null, existing?.degree_level),
+    field_of_study: merge(parsed.field_of_study as string | null, existing?.field_of_study),
+    university: merge(parsed.university as string | null, existing?.university),
+    graduation_year: merge(parsed.graduation_year as number | null, existing?.graduation_year),
+    cgpa: merge(parsed.cgpa as number | null, existing?.cgpa),
+    skills: Array.isArray(parsed.skills) && parsed.skills.length
+      ? Array.from(new Set([...(existing?.skills ?? []), ...(parsed.skills as string[])]))
+      : existing?.skills,
+    achievements: merge(parsed.achievements as string | null, existing?.achievements),
+    work_years: merge(parsed.work_years as number | null, existing?.work_years),
+    bio: merge(parsed.bio as string | null, existing?.bio),
+  };
+  const values = Object.values(patch);
+  const filled = values.filter((v) => v != null && v !== "" && !(Array.isArray(v) && v.length === 0)).length;
+  const completion_pct = Math.round((filled / values.length) * 100);
+
+  await supabase
+    .from("profiles")
+    .update({ ...(patch as Record<string, unknown>), completion_pct } as never)
+    .eq("user_id", userId);
+  return patch;
+}
+
+async function getSb() {
+  // helper type-only shim
+  return null as unknown as import("@supabase/supabase-js").SupabaseClient<
+    import("@/integrations/supabase/types").Database
+  >;
+}
+
+export const analyzeResume = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => z.object({ text: z.string().min(50) }).parse(input))
+  .handler(async ({ data, context }) => {
+    const patch = await analyzeResumeInternal(context.supabase, context.userId, data.text);
+    return { ok: true, patch };
   });
 
 export const listDocuments = createServerFn({ method: "GET" })

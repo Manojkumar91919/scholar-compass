@@ -30,7 +30,12 @@ function DocsPage() {
   const mut = useMutation({
     mutationFn: () => review({ data: { title, kind, text } }),
     onSuccess: () => {
-      toast.success("Review complete");
+      if (kind === "resume") {
+        toast.success("Resume reviewed — profile auto-updated from resume ✨");
+        qc.invalidateQueries({ queryKey: ["profile"] });
+      } else {
+        toast.success("Review complete");
+      }
       qc.invalidateQueries({ queryKey: ["docs"] });
       setTitle(""); setText("");
     },
