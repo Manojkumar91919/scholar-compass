@@ -172,37 +172,36 @@ export async function searchAgent(sb: SB, runId: string, profile: Profile, query
       SearchFilters,
     )) ?? { keywords: query, country: null, degree_level: null, field: null };
 
-    // Hybrid retrieval: try embedding first, fall back to text ilike.
+    // Hybrid retrieval: embedding first, keyword fallback.
     let scholarships: Scholarship[] = [];
     try {
       const emb = await embed(`${query} ${filters.keywords}`, requireApiKey());
       const { data } = await sb.rpc("match_scholarships", {
         query_embedding: emb as never,
-        match_count: 20,
+        match_count: 40,
         filter_country: filters.country ?? undefined,
         filter_degree: (filters.degree_level as never) ?? undefined,
       });
       if (data && data.length) {
-        // Enrich with full row
         const ids = data.map((d) => d.id);
-        const { data: full } = await sb
-          .from("scholarships")
-          .select("*")
-          .in("id", ids);
+        const { data: full } = await sb.from("scholarships").select("*").in("id", ids).eq("is_active", true);
         scholarships = (full ?? []) as Scholarship[];
       }
     } catch {
-      // Embedding failed — fall back
+      /* embedding failed */
     }
     if (scholarships.length === 0) {
       const kw = filters.keywords || query;
-      const q = sb.from("scholarships").select("*").eq("is_active", true);
-      if (filters.country) q.eq("country", filters.country);
-      const { data } = kw
-        ? await q.or(`title.ilike.%${kw}%,summary.ilike.%${kw}%,tags.cs.{${kw}}`).limit(20)
-        : await q.limit(20);
+      let qb = sb.from("scholarships").select("*").eq("is_active", true);
+      if (filters.country) qb = qb.eq("country", filters.country);
+      if (kw) qb = qb.or(`title.ilike.%${kw}%,summary.ilike.%${kw}%,eligibility.ilike.%${kw}%,tags.cs.{${kw}}`);
+      const { data } = await qb.limit(40);
       scholarships = (data ?? []) as Scholarship[];
     }
+
+    // Deterministic post-filter for accuracy — filters extracted by LLM
+    // are trustworthy hints; drop obvious mismatches and expired deadlines.
+    scholarships = postFilter(scholarships, filters, profile);
 
     await logStep(sb, runId, "search", { query, filters }, { count: scholarships.length }, Date.now() - t0);
     return { filters, scholarships };
@@ -211,6 +210,35 @@ export async function searchAgent(sb: SB, runId: string, profile: Profile, query
     await logStep(sb, runId, "search", { query }, null, Date.now() - t0, err);
     throw e;
   }
+}
+
+/** Pure post-filter: drops expired deadlines and hard mismatches. Exported for tests. */
+export function postFilter(
+  scholarships: Scholarship[],
+  filters: { keywords?: string; country?: string | null; degree_level?: string | null; field?: string | null },
+  profile: Profile,
+): Scholarship[] {
+  const today = Date.now();
+  return scholarships.filter((s) => {
+    if (s.deadline && new Date(s.deadline).getTime() < today) return false;
+    if (filters.country && s.country && s.country !== "Global" && s.country !== filters.country) return false;
+    if (filters.degree_level && s.degree_level && s.degree_level !== "any" && s.degree_level !== filters.degree_level) return false;
+    if (filters.field && s.fields?.length) {
+      const f = filters.field.toLowerCase();
+      const hit = s.fields.some((x) => x.toLowerCase().includes(f) || f.includes(x.toLowerCase()));
+      if (!hit) return false;
+    }
+    if (
+      profile.country &&
+      s.eligible_countries &&
+      s.eligible_countries.length > 0 &&
+      !s.eligible_countries.includes(profile.country) &&
+      !s.eligible_countries.includes("Global")
+    ) {
+      return false;
+    }
+    return true;
+  });
 }
 
 // ----- ELIGIBILITY AGENT -----
