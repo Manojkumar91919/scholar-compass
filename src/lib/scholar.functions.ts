@@ -338,7 +338,7 @@ async function analyzeResumeInternal(
 
   await supabase
     .from("profiles")
-    .update({ ...(patch as never), completion_pct })
+    .update({ ...(patch as Record<string, unknown>), completion_pct } as never)
     .eq("user_id", userId);
   return patch;
 }
